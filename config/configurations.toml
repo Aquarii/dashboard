@@ -1,0 +1,12 @@
+[last_updates]
+instrument = 20230201
+capital_increase = "2810"
+instrument_type = 2023-02-02 13:26:47.665230
+
+[configs]
+config_file_path = "D:\\Alpar\\assisstant\\dashboard\\config\\configurations.toml"
+db_path = "D:\\Alpar\\assisstant\\dashboard\\db\\catalogue.db"
+
+[db_health]
+last_check_time = "datetime -not yet implemented"
+last_check_status = "ok/faulty -not yet implemented"
