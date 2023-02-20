@@ -1,3 +1,4 @@
+# region Implemented Codes
 import requests
 import asyncio
 import aiohttp
@@ -7,18 +8,23 @@ from .utils import ar_to_fa
 from tqdm import tqdm
 # from lxml import html
 # import json
-# import pandas as pd
+import pandas as pd
+import config 
 
+
+cfg = config.configs
 
 request_headers = {
     'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
     'Referer':'http://main.tsetmc.com/StaticContent/WebServiceHelp'
     }
 cookie_jar = {'ASP.NET_SessionId': 'wa40en1alwxzjnqehjntrv5j'}
+# ================================================================= #
+#                               Utils                               #
+# ================================================================= #
 
-
-#=============== Convert XML/HTML <table> to Matrix =================#
-def xml_table_to_matrix(xml_table):
+# ============ Convert XML/HTML <table> to Matrix ============ #
+def html_table_to_matrix(xml_table): 
     """Parses a html segment started with tag <table> followed
     by multiple <tr> (table rows) and inner <td> (table data) tags.
     It returns a list of rows with inner columns.
@@ -39,19 +45,23 @@ def xml_table_to_matrix(xml_table):
         rows.append(rowgetDataText(tr, 'td')) # data row
     return rows
 
+# ================================================================= #
+#                      Scrape Instrument Types                      #
+# ================================================================= #
 
-#================ Scrape Instrument Types ================#
 def instrument_types():
     ws_instrument_text = requests.get(
         'http://cdn.tsetmc.com/api/StaticData/GetStaticContent/WS-Instrument', 
         headers= request_headers).text
     soup = BeautifulSoup(ws_instrument_text, 'lxml')
     table = soup.find_all('tbody')[3]
-    return xml_table_to_matrix(table)
+    return html_table_to_matrix(table)
 
 
-#=============== Scrape Instrument Attribs/Identity (شناسه) ===============#
-# get identity page
+# ================================================================= #
+#       Scrape Instrument Attribs/Identity (شناسه) - Async         #
+# ================================================================= #
+
 async def get_identity_html(instrument_id: str) -> str:
     logging.info(f"Getting HTML for instrument {instrument_id}")
     
@@ -60,7 +70,7 @@ async def get_identity_html(instrument_id: str) -> str:
     #sem = asyncio.BoundedSemaphore(25)
     
     #async with sem:
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit_per_host=25)) as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit_per_host=5)) as session:
         async with session.get(url, headers=request_headers) as resp:
             resp.raise_for_status()
             
@@ -68,13 +78,13 @@ async def get_identity_html(instrument_id: str) -> str:
             return html
 
 # parse HTML and extract Table
-def get_table_identity(html: str) -> str:
+def get_table_identity(html: str):
     soup = BeautifulSoup(html, 'lxml')
     table = soup.find("table", class_='table1')
     if not table:
         return "MISSING"
     
-    return xml_table_to_matrix(table)
+    return html_table_to_matrix(table)
 
 
 # get identities
@@ -93,23 +103,104 @@ def get_identities_async(instrument_ids):
     return asyncio.run(get_instruments_identity(instrument_ids))
 
 
-
-#================= Get Instruments Attrib(Identity) Synchronous way ==============#
+# ================================================================= #
+#           Get Instruments Attrib(Identity) - Synchronous          #
+# ================================================================= #
 def identity(instrument_id):
     resp = requests.get(
         f'http://www.tsetmc.com/Loader.aspx?Partree=15131M&i={instrument_id}', 
         headers= request_headers)
     soup = BeautifulSoup(resp.text, 'lxml')
     table = soup.find("table", class_='table1')
-    return xml_table_to_matrix(table)
+    return html_table_to_matrix(table)
+
+# endregion 
+# ================================================================= #
+#                OHLCV Prices up to the current date                #
+# ================================================================= #
+
+def get_instrument_daily_price_history_up_to_date(instrument_id, date, hide_days_with_no_trades=0):
+    resp = requests.get(
+        url=cfg['URI']['DAILY_PRICES_HISTROY_TO_DATE'].format(instrument_id, date, hide_days_with_no_trades))
+    resp.raise_for_status()
+    logging.info(f'Instrument in use: {instrument_id}')
+    if resp.text:
+        return pd.DataFrame(
+        [price.split(',') for price in resp.text.split(';')], 
+        columns=[
+            'instrument_id', 
+            'date', 
+            'close', 
+            'last', 
+            'transaction_count', 
+            'volume', 
+            'value_traded', 
+            'low', 
+            'high', 
+            'dday', 
+            'open'])
+    else:
+        logging.info(f'{instrument_id}: No Quote.')
 
 
+# ================================================================= #
+#           OHLCV Prices up to the current date - Async             #
+# ================================================================= #
+
+async def get_response_async_daily_quotes_api(instrument_id):
+    logging.info(f"Getting quotes of instrument {instrument_id}")
+    
+    url = cfg['URI']['DAILY_PRICES_HISTROY_TO_DATE']
+    from_date = cfg['last_update']['daily_quotes']
+    hide_days_with_no_trades = 1
+    
+    #sem = asyncio.BoundedSemaphore(25)
+    
+    #async with sem:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit_per_host=1)) as session:
+        async with session.get(url.format(instrument_id, from_date, hide_days_with_no_trades)) as resp:
+            resp.raise_for_status()
+            
+            return await resp.text()
 
 
+async def loop_coroutines_daily_quotes(instrument_ids):
+    loop = asyncio.get_event_loop()
+    tasks = [loop.create_task(get_response_async_daily_quotes_api(id)) for id in instrument_ids]
+    
+    all_quotes = pd.DataFrame()
+    for task in tqdm(tasks):
+        quotes_raw = await task
+        if quotes_raw:
+            all_quotes = pd.concat(
+                [all_quotes,
+                pd.DataFrame(
+                [price.split(',') for price in quotes_raw.split(';')], 
+                columns=[
+                    'instrument_id', 
+                    'date', 
+                    'close', 
+                    'last', 
+                    'transaction_count', 
+                    'volume', 
+                    'value_traded', 
+                    'low', 
+                    'high', 
+                    'dday', 
+                    'open'])])
+    return all_quotes
 
 
-''' Obsolete
-#=============== Get the Last Trading Day (Update Date) ===============#  Obsolete
+def get_daily_quotes_async(instrument_ids):
+    return asyncio.run(loop_coroutines_daily_quotes(instrument_ids))
+
+# ================================================================= #
+#           OHLCV Prices up to the current date - Async             #
+# ================================================================= #
+# # def get_price_history_last_n_days()
+
+''' Alternative Approach 
+#=============== Get the Last Trading Day (Update Date) ===============#  Alternative
 def last_workday(jalali=False):
     response = req.get('http://tsetmc.com/tsev2/data/TseClient2.aspx?t=LastPossibleDeven')
     last_workday = response.text.split(';')[0]  # Last Finished Workday
@@ -121,7 +212,7 @@ def last_workday(jalali=False):
         return last_workday
 
 
-#=============== Get the List of All Valid Instruments ===================#  Obsolete
+#=============== Get the List of All Valid Instruments ===================#  Alternative
 def instruments(last_fetch_date:int):
     response = req.get(f'http://tsetmc.com/tsev2/data/TseClient2.aspx?t=Instrument&a={last_fetch_date}')
     if len(response.text):
@@ -151,7 +242,7 @@ def instruments(last_fetch_date:int):
         print('No New Instruments to Get.')
 
 
-#=============== Get the List of Added Instruments + Capital Stock Increments ===================#  Obsolete
+#=============== Get the List of Added Instruments + Capital Stock Increments ===================#  Alternative
 def instruments_and_shares(last_fetch_date, last_record_id):
     response = req.get(f'http://tsetmc.com/tsev2/data/TseClient2.aspx?t=InstrumentAndShare&a={last_fetch_date}&a2={last_record_id}')
     instruments = response.text.split('@')[0].split(';')
@@ -187,12 +278,12 @@ def instruments_and_shares(last_fetch_date, last_record_id):
     return instruments, share_changes
 
 
-#=============== DecompressAndGetInsturmentClosingPrice =================#  Obsolete
+#=============== DecompressAndGetInsturmentClosingPrice =================#  Alternative
 
 
 
 
-#=============== Get All the Instruments of IFB.ir ================#  Obsolete
+#=============== Get All the Instruments of IFB.ir ================#  Alternative
 def farabourse_instruments():
     ifb_resp = req.get(url='https://www.ifb.ir/ThirdMarket/AllUnderWrited.aspx',
                         headers={
