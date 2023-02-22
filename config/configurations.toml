@@ -1,16 +1,12 @@
-[last_update]
-instrument = 20230208
-capital_increase = "2818"
-instrument_type = 0
-daily_quotes = 20230219
+[LAST_UPDATE]
+INSTRUMENTS = 20230222
+CAPITAL_INCREASE = "2835"
+INSTRUMENT_TYPES = 2023-02-22
+DAILY_QUOTES = 20230222
 
-[path]
-config_file = "D:\\Alpar\\assisstant\\dashboard\\config\\configurations.toml"
+[PATH]
+CONFIG_FILE = "D:\\Alpar\\assisstant\\dashboard\\config\\configurations.toml"
 db = "D:\\Alpar\\assisstant\\dashboard\\db\\catalogue.db"
-
-[db_health]
-last_check_time = "datetime -not yet implemented"
-last_check_status = "ok/faulty -not yet implemented"
 
 [URI]
 DAILY_PRICES_HISTROY_TO_DATE = "http://service.tsetmc.com/tsev2/data/TseClient2.aspx?t=ClosingPrices&a={}"
@@ -19,3 +15,10 @@ TRADE_DETAILS_HISTORY = "http://cdn.tsetmc.com/api/Trade/GetTradeHistory/{}/{}/{
 TRADE_DETAILS_CURRENT_DAY = "http://www.tsetmc.com/tsev2/data/TradeDetail.aspx?i={}"
 CLIENT_TYPE_HISTORY = "http://cdn.tsetmc.com/api/ClientType/GetClientTypeHistory/{}/{}"
 SHAREHOLDER_HISTORY = "http://cdn.tsetmc.com/api/Shareholder/{}/{}"
+
+[DB]
+HOST = "127.0.0.1"
+NAME = "Alpar"
+USERNAME = "Ali"
+PASSWORD = "1328"
+HEALTH = "STATUS@DATETIME"

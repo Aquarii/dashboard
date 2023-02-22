@@ -3,7 +3,7 @@ import logging
 import aiohttp
 from bs4 import BeautifulSoup
 import requests
-import tqdm
+from tqdm import tqdm
 import zeep
 import pandas as pd
 
@@ -58,26 +58,26 @@ def instruments(last_fetch):
         instruments = pd.DataFrame(instrument.split(',') for instrument in instruments.split(';'))
         instruments.columns = [
             'id',
-            'code',
-            'code_5',
+            'company_code_12',
+            'inst_code_5',
             'name_latin',
-            'code_4',
+            'company_code_4',
             'ticker',
-            'description',
+            'name',
             'isin',
             'mod_date',
             'market_code',
             'company_name',
             'status_code',
             'group_code',
-            'market_type',
+            'market_type_code',
             'tableu_code',
             'industry_sector_code',
             'industry_subsector_code',
-            'type_code']
+            'category_code']
         instruments.set_index('id', inplace=True)
         instruments['ticker'] = ar_to_fa_series(instruments['ticker'])
-        instruments['description'] = ar_to_fa_series(instruments['description'])
+        instruments['name'] = ar_to_fa_series(instruments['name'])
         instruments['company_name'] = ar_to_fa_series(instruments['company_name'])
         return instruments
     else:
@@ -92,74 +92,53 @@ def last_possible_deven():
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instruments and Shares (API) ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
-def instruments_and_capital_increase(last_workday, last_record_id):
+def instruments_and_share_increase(last_fetch_date, last_record_id):
     client = zeep.Client(wsdl='http://service.tsetmc.com/WebService/TseClient.asmx?wsdl')
     
-    instruments, capital_increase = client.service.InstrumentAndShare(last_workday, last_record_id).split('@')
+    instruments, share_increase = client.service.InstrumentAndShare(last_fetch_date, last_record_id).split('@')
     
     if instruments:
         instruments = instruments.split(';')
         instruments = pd.DataFrame([instrument.split(',')for instrument in instruments])
         instruments.columns = [
             'id',
-            'code',
-            'code_5',
+            'company_code_12',
+            'inst_code_5',
             'name_latin',
-            'code_4',
+            'company_code_4',
             'ticker',
-            'description',
+            'name',
             'isin',
             'mod_date',
             'market_code',
             'company_name',
             'status_code',
             'group_code',
-            'market_type',
+            'market_type_code',
             'tableu_code',
             'industry_sector_code',
             'industry_subsector_code',
-            'type_code']
+            'category_code']
         instruments.set_index('id', inplace=True)
         instruments['ticker'] = ar_to_fa_series(instruments['ticker'])
-        instruments['description'] = ar_to_fa_series(instruments['description'])
+        instruments['name'] = ar_to_fa_series(instruments['name'])
         instruments['company_name'] = ar_to_fa_series(instruments['company_name'])
     
-    if capital_increase:
-        capital_increase = capital_increase.split(';')
-        capital_increase = pd.DataFrame([share.split(',') for share in capital_increase])
-        capital_increase.columns = [
+    if share_increase:
+        share_increase = share_increase.split(';')
+        share_increase = pd.DataFrame([share.split(',') for share in share_increase])
+        share_increase.columns = [
             'record_id',
             'id',
             'date',
             'before_raise',
             'after_raise']
         #capital_increase['record_id'] = capital_increase['record_id'].astype(int)
-        capital_increase.set_index('record_id', inplace=True)
+        share_increase.set_index('record_id', inplace=True)
     else:
-        capital_increase = None
+        share_increase = None
         
-    return instruments, capital_increase
-
-# ◀►◀►◀►◀►◀►◀►◀ rename columns before reinit db
-# instruments.columns = [
-#     'id',
-#     'company_code_12',
-#     'inst_code_5',
-#     'name_latin',
-#     'company_code_4',
-#     'ticker',
-#     'description',
-#     'isin',
-#     'mod_date',
-#     'market_code',
-#     'company_name',
-#     'status_code',
-#     'group_code',
-#     'market_type_code',
-#     'tableu_code',
-#     'industry_sector_code',
-#     'industry_subsector_code',
-#     'security_category_code']
+    return instruments, share_increase
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Decompress And Get Insturments Closing Prices (API) ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
@@ -268,8 +247,8 @@ def identities_async(instrument_ids):
 def instrument_daily_quotes_history_up_to_date(arg):
     resp = requests.get(url=cfg['URI']['DAILY_PRICES_HISTROY_TO_DATE'].format(arg))
     # resp.raise_for_status()
-    logging.info(f'Instrument: {arg}')
-    if resp.text:
+    logging.info(f'Arg: {arg}')
+    if resp and resp.text:
         return pd.DataFrame(
         [price.split(',') for price in resp.text.split(';')], 
         columns=[

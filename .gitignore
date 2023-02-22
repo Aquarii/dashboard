@@ -9,3 +9,4 @@ roya.py
 .vscode/settings.json
 **/__pycache__/*
 db/catalogue.db
+config/configurations.toml
