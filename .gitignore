@@ -1,11 +1,5 @@
 draft.py
 log.log
-roya.py
-.idea/dashboard.iml
-.idea/misc.xml
-.idea/modules.xml
-.idea/.gitignore
-.idea/inspectionProfiles/profiles_settings.xml
 .vscode/settings.json
 **/__pycache__/*
 db/catalogue.db

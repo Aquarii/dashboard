@@ -303,7 +303,7 @@ def update_daily_quotes(force_init=False):
             return id + ',' + str(date) + ',' + '0'
     
     daily_quotes = pd.concat(
-        [fetch.instrument_daily_quotes_history_up_to_date(make_arg(id,date)) for id in tqdm(instruments.index[60:90])])
+        [fetch.instrument_daily_quotes_history_up_to_date(make_arg(id,date)) for id in tqdm(instruments.index)])
     # daily_ohlcv = scrape.get_daily_quotes_async(instruments.index[10:30]) #Async #Later
     
     #write to db

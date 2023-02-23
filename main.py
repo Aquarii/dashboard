@@ -14,5 +14,5 @@ print('Latest Workday: {}\nLast Database Update: {}'.format(latest_workday,cfg['
 
 # Main.py
 # region: Update Database
-update_db('instrument_types')
+update_db()
 # endregion
