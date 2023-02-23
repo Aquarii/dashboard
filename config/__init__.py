@@ -1,10 +1,10 @@
 from pathlib import Path
 import tomli, tomli_w
 
-
-config_path = Path(__file__).parent / 'configurations.toml'
+root = Path(__file__).parent.parent
+config_path = (Path(__file__).parent / 'configurations.toml').relative_to(root)
 config_path.touch(exist_ok=True)
-db_path = Path(__file__).parent.parent / 'db' / 'catalogue.db'
+db_path = (Path(__file__).parent.parent / 'db' / 'catalogue.db').relative_to(root)
 
 # make config private later and def its getter
 # def load():
