@@ -229,7 +229,7 @@ async def get_instruments_identity(instrument_ids):
 
 # make a clean df out of all the IDs' matrices 
 def identities_async(instrument_ids): 
-    print('Getting Identities...')
+    print('\nGetting Identities of Instruments...')
     matrices = asyncio.run(get_instruments_identity(instrument_ids))
     
     updated_ids = pd.DataFrame()
@@ -246,8 +246,10 @@ def identities_async(instrument_ids):
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instrument Daily OHLCV Values up to the current date ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 def instrument_daily_quotes_history_up_to_date(arg):
     resp = requests.get(url=cfg['URI']['DAILY_PRICES_HISTROY_TO_DATE'].format(arg))
-    # resp.raise_for_status()
+    resp.raise_for_status()
+    
     logging.info(f'Arg: {arg}')
+    
     if resp and resp.text:
         return pd.DataFrame(
         [price.split(',') for price in resp.text.split(';')], 

@@ -10,7 +10,7 @@ from data_ops import (
 
 
 cfg = config.configs 
-print('Latest Workday: {}\nLast Database Update: {}'.format(latest_workday,cfg['LAST_UPDATE']['INSTRUMENTS']))
+print('\nLatest Workday: {}\nLast Database Update: {}\n'.format(latest_workday,cfg['LAST_UPDATE']['INSTRUMENTS']))
 
 # Main.py
 # region: Update Database

@@ -1,5 +1,6 @@
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Imports & Setups ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 from datetime import datetime
+import more_itertools as mit
 from sqlalchemy import create_engine, URL, text
 import pandas as pd
 import config
@@ -42,46 +43,84 @@ def check_db_integrity(table_names:list): #later
 
 def update_db(*tables:str, force_init=False):
     '''
-    Pick Tables from: 
+    No Args= instruments + daily_quotes\n
+    Pick Tables from:\n
     \t"instruments": Updates Instruments Catalogue and Share Increase.\n
     \t"daily_quotes": Updates Quotes of Instruments in "instruments".\n
+    \t"instruments_info_only": Updates Instruments Catalogue in "instruments".\n
+    \t"instrument_types": Updates Instrument Types in "instrument_types".\n
     '''
     if not len(tables):
         tables = ('instruments', 'daily_quotes')
     
     for table in tables:
         match table:
+            # ---------- instruments and share increase ---------- #
             case 'instruments':
                 if cfg['LAST_UPDATE']['INSTRUMENTS'] == latest_workday:
                     print('Instruments Catalogue is already up to date.')
+                
                 elif cfg['LAST_UPDATE']['INSTRUMENTS'] < latest_workday:
                     update_instruments_info_and_share_increase(force_init=force_init)
+                    
                     if not cfg['LAST_UPDATE']['INSTRUMENTS']:
                         update_instrument_types()
+                        
+                        # set conf
+                        cfg['LAST_UPDATE']['INSTRUMENT_TYPES'] = datetime.now().date()
+                        
                         print('Catalogue Initialized.')
+                    
                     else:
                         print('Catalogue updated.')
+                    
+                    # set conf
+                    cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
+                
                 else:
                     print('Error: Invalid Configuration.')
             
+            # ---------- daily quotes ---------- #
             case 'daily_quotes':
                 if cfg['LAST_UPDATE']['DAILY_QUOTES'] == latest_workday:
-                    print('Instruments Catalogue is already up to date.')
+                    print('Daily Quotes are already up to date.')
+                
                 elif cfg['LAST_UPDATE']['DAILY_QUOTES'] < latest_workday:
                     update_daily_quotes(force_init=force_init)
+                    
                     if not cfg['LAST_UPDATE']['DAILY_QUOTES']:
                         print('Daily Quotes Initialized.')
+                    
                     else:
                         print('Daily Quotes updated.')
+                    
+                    #set config
+                    cfg['LAST_UPDATE']['DAILY_QUOTES'] = latest_workday
+                
                 else:
                     print('Error: Invalid Configuration.')
             
+            # ---------- instrument types ---------- #
             case 'instrument_types':
                 update_instrument_types()
+                
                 print('Instrument Type Catalogue Updated.')
+                
+                # set conf
+                cfg['LAST_UPDATE']['INSTRUMENT_TYPES'] = datetime.now().date()
             
+            # ---------- update instruments info only ---------- #
+            case 'instruments_info_only':
+                update_instruments_info()
+                
+                # set conf
+                cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
+            
+            # ---------- default ---------- #
             case _:
                 print('Input Not Recognized.')
+    
+    config.write(cfg)
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instruments Category Info ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
@@ -159,29 +198,23 @@ def update_instruments_info(force_init=False):
     
     conn.commit()
     conn.close()
-    
-    # set conf
-    cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
-    config.write(cfg)
-
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instrument Types ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
 def update_instrument_types():
     instrument_types = fetch.instrument_types()
     
-    with engine.connect() as conn:
-        instrument_types.to_sql(
-            'instrument_types', 
-            con=conn, 
-            if_exists='replace', 
-            index=True, 
-            method='multi') # dtypes later
-        conn.commit()
+    conn = engine.connect()
     
-    # set conf
-    cfg['LAST_UPDATE']['INSTRUMENT_TYPES'] = datetime.now().date()
-    config.write(cfg)
+    instrument_types.to_sql(
+        'instrument_types', 
+        con=conn, 
+        if_exists='replace', 
+        index=True, 
+        method='multi') # dtypes later
+    
+    conn.commit()
+    conn.close()
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instruments Category Info & Share Increase ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
@@ -199,9 +232,10 @@ def update_instruments_info_and_share_increase(force_init=False):
     # all_open_instruments = fetch.instruments(0) # FOR HISTORY
     instrument_update, share_increase = fetch.instruments_and_share_increase(
         last_fetch_date=cfg['LAST_UPDATE']['INSTRUMENTS'],
-        last_record_id=cfg['LAST_UPDATE']['CAPITAL_INCREASE'])
+        last_record_id=cfg['LAST_UPDATE']['CAPITAL_INCREASE']
+    )
     
-    ids_to_get_attrs_for = instrument_update[instrument_update['tableu_code'] != '6'].index
+    ids_to_get_attrs_for = instrument_update[instrument_update['tableu_code'] != '6'].index ###########################
     
     conn = engine.connect()
     
@@ -245,7 +279,7 @@ def update_instruments_info_and_share_increase(force_init=False):
         index=True, 
         method='multi') # dtypes later
     
-# --- Identities(attrs/شناسه): get updates, overwrite moded, append new, write to db
+    # --- Identities(attrs/شناسه): get updates, overwrite moded, append new, write to db
     if cfg['LAST_UPDATE']['INSTRUMENTS']:
         identities = pd.read_sql(text('SELECT * FROM identity'), con=conn)
     else: 
@@ -262,9 +296,6 @@ def update_instruments_info_and_share_increase(force_init=False):
         index=False, 
         method='multi')
     
-    # set conf
-    cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
-    
     if share_increase is not None:
         share_increase.to_sql(
             'capital_increase', 
@@ -280,16 +311,14 @@ def update_instruments_info_and_share_increase(force_init=False):
     # clean up the mess. TODO: Replace aqlalchemy with psycopg2.
     conn.commit()
     conn.close()
-    config.write(cfg)
+    config.write(cfg) 
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Daily Quotes ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
 def update_daily_quotes(force_init=False):    
-    with engine.connect() as conn:
-        instruments = pd.read_sql(text('select id, tableu_code from instruments'), con=conn, index_col='id')
-        #conn.commit()
-        #conn.close()
+    conn = engine.connect()
+    instruments = pd.read_sql(text('select id, tableu_code from instruments'), con=conn, index_col='id')
     
     if force_init:
         date = 0
@@ -302,23 +331,21 @@ def update_daily_quotes(force_init=False):
         else:
             return id + ',' + str(date) + ',' + '0'
     
-    daily_quotes = pd.concat(
-        [fetch.instrument_daily_quotes_history_up_to_date(make_arg(id,date)) for id in tqdm(instruments.index)])
-    # daily_ohlcv = scrape.get_daily_quotes_async(instruments.index[10:30]) #Async #Later
+    print('\nGetting Daily Quotes...')
     
-    #write to db
-    with engine.connect() as conn:
+    # Async Later # Freezes without Chunkes
+    for chunk in tqdm(mit.ichunked(tqdm(instruments.index), 50)):
+        daily_quotes = pd.concat(
+            [fetch.instrument_daily_quotes_history_up_to_date(make_arg(id,date)) for id in chunk]
+        )
+        
+        #write to db
         if date:
             daily_quotes.to_sql('daily_quotes', con=conn, if_exists='append', index=False)
         else:
             daily_quotes.to_sql('daily_quotes', con=conn, if_exists='replace', index=False)
-        conn.commit()
     
+    conn.commit()
     conn.close()
-    
-    #set config
-    cfg['LAST_UPDATE']['DAILY_QUOTES'] = latest_workday
-    
-    config.write(cfg)
 
 
