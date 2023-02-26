@@ -52,6 +52,9 @@ def html_table_to_matrix(xml_table):
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instruments (API) ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 def instruments(last_fetch):
+    '''
+    last_fetch:\n\tDate after which Traded Instruments are needed.
+    '''
     client = zeep.Client(wsdl='http://service.tsetmc.com/WebService/TseClient.asmx?wsdl')
     instruments = client.service.Instrument(last_fetch)
     if instruments:
