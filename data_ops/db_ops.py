@@ -1,6 +1,6 @@
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Imports & Setups ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 from datetime import datetime
-import more_itertools as mit
+from more_itertools import ichunked
 from sqlalchemy import create_engine, URL, text
 import pandas as pd
 import config
@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 logging.basicConfig(
     filename='log.log', 
-    filemode='w', 
+    filemode='a', 
     level=logging.INFO,
     format='%(asctime)s >> %(levelname)s >> %(filename)s >> %(lineno)d >> %(message)s')
 
@@ -152,11 +152,16 @@ def update_instruments_info(force_init=False):
         repeated_instruments = instrument_update[common_filter]
         shelved_instruments = instrument_prev[~instrument_prev.index.isin(all_open_instruments.index)] # Usage in History
         
+        new_instruments.to_sql('instruments_latest_addition', conn, if_exists='replace', index=True)
+        logging.info(
+            f'{len(new_instruments.index)} new instruments registered at tse db since last update. ')
+        
         for idx in repeated_instruments.index:
             instrument_prev.loc[idx] = repeated_instruments.loc[idx]
         
         instrument_update = pd.concat([instrument_prev, new_instruments])
-        # region: History of All the Instruments #later
+        
+        # region: History of Modifications of All the Instruments #later
         # instruments_mod_history = pd.concat([instrument_prev, instrument_update])
         # instruments_mod_history.drop_duplicates(['isin','mod_date'], inplace=True)
         
@@ -167,10 +172,6 @@ def update_instruments_info(force_init=False):
         #     index=True, 
         #     method='multi') # dtypes later
         # endregion
-        logging.info(
-            len(new_instruments.index), 
-            'new instruments registered at tse db since last update: ', 
-            new_instruments['ticker'])
     
     instrument_update.to_sql(
         'instruments', 
@@ -251,11 +252,16 @@ def update_instruments_info_and_share_increase(force_init=False):
         repeated_instruments = instrument_update[common_filter]
         # shelved_instruments = instrument_prev[~instrument_prev.index.isin(all_open_instruments.index)] # FOR HISTORY
         
+        new_instruments.to_sql('instruments_latest_addition', conn, if_exists='replace', index=True)
+        logging.info(
+            f'{len(new_instruments.index)} new instruments registered at tse db since last update. ')
+        
         for idx in repeated_instruments.index:
             instrument_prev.loc[idx] = repeated_instruments.loc[idx]
         
         instrument_update = pd.concat([instrument_prev, new_instruments])
-        # region: History of All the Instruments
+        
+        # region: History of Modifications of All the Instruments
         # instruments_mod_history = pd.concat([instrument_prev, instrument_update])
         # instruments_mod_history.drop_duplicates(['isin','mod_date'], inplace=True)
         
@@ -266,11 +272,6 @@ def update_instruments_info_and_share_increase(force_init=False):
         #     index=True, 
         #     method='multi') # dtypes later
         # endregion
-        
-        logging.info(
-            len(new_instruments.index), 
-            'new instruments registered at tse db since last update: ', 
-            new_instruments['ticker'])
     
     instrument_update.to_sql(
         'instruments', 
@@ -334,16 +335,12 @@ def update_daily_quotes(force_init=False):
     print('\nGetting Daily Quotes...')
     
     # Async Later # Freezes without Chunkes
-    for chunk in tqdm(mit.ichunked(tqdm(instruments.index), 50)):
+    for chunk in tqdm(ichunked(tqdm(instruments.index), 20)):
         daily_quotes = pd.concat(
             [fetch.instrument_daily_quotes_history_up_to_date(make_arg(id,date)) for id in chunk]
         )
         
-        #write to db
-        if date:
-            daily_quotes.to_sql('daily_quotes', con=conn, if_exists='append', index=False)
-        else:
-            daily_quotes.to_sql('daily_quotes', con=conn, if_exists='replace', index=False)
+        daily_quotes.to_sql('daily_quotes', con=conn, if_exists='append', index=False)
     
     conn.commit()
     conn.close()
