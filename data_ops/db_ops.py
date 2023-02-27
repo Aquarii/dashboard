@@ -19,8 +19,13 @@ logging.basicConfig(
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Global Vars ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
-latest_workday = int(fetch.last_possible_deven())
 cfg = config.configs
+for key in cfg['DB'].keys():
+    if not cfg['DB'][key]:
+        cfg['DB'][key] = input(f'Insert Postgres Database "{key.capitalize()}": ')
+
+latest_workday = int(fetch.last_possible_deven())
+
 db_url = URL.create(
     'postgresql+psycopg2',
     username = cfg['DB']['USERNAME'],
