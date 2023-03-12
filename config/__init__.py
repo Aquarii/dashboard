@@ -1,5 +1,6 @@
 from pathlib import Path
 import tomli, tomli_w
+from datetime import datetime
 
 root = Path(__file__).parent.parent
 config_path = (Path(__file__).parent / 'configurations.toml').relative_to(root)
@@ -17,17 +18,17 @@ def write(conf:dict):
     with config_path.open(mode='wb') as file:
         tomli_w.dump(conf, file)
 
-if not configs: # if not load():
+if not configs: 
     configs =  {
         'LAST_UPDATE': {
             'INSTRUMENTS': 0, 
+            'IDENTITIES': 0, 
             'CAPITAL_INCREASE': 0,
-            'INSTRUMENT_TYPES': 0,
-            'DAILY_QUOTES': 0
+            'INSTRUMENT_TYPES': datetime(2000, 1, 1).date()
         },
         'PATH': {
             'CONFIG_FILE': str(config_path),
-            'db': str(db_path)
+            'DB': str(db_path)
         },
         'URI': {
             'DAILY_PRICES_HISTROY_TO_DATE':'http://service.tsetmc.com/tsev2/data/TseClient2.aspx?t=ClosingPrices&a={}',
@@ -37,7 +38,7 @@ if not configs: # if not load():
             'CLIENT_TYPE_HISTORY':'http://cdn.tsetmc.com/api/ClientType/GetClientTypeHistory/{}/{}',
             'SHAREHOLDER_HISTORY':'http://cdn.tsetmc.com/api/Shareholder/{}/{}'
         },
-        'DB':{
+        'PG_DB':{
             'HOST': '127.0.0.1',
             'NAME': '',
             'USERNAME': '',

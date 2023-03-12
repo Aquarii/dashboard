@@ -1,14 +1,15 @@
+from random import random
+from time import sleep
+import zeep
 import asyncio
-import logging
+import requests
 import aiohttp
 from bs4 import BeautifulSoup
-import requests
-from tqdm import tqdm
-import zeep
 import pandas as pd
-
+from tqdm import tqdm
 import config
-from .utils import ar_to_fa_series, ar_to_fa
+from .utils import logger_app, ar_to_fa_series, ar_to_fa
+
 
 cfg = config.configs
 
@@ -61,7 +62,7 @@ def instruments(last_fetch):
         instruments = pd.DataFrame(instrument.split(',') for instrument in instruments.split(';'))
         instruments.columns = [
             'id',
-            'company_code_12',
+            'inst_code_12',
             'inst_code_5',
             'name_latin',
             'company_code_4',
@@ -77,7 +78,7 @@ def instruments(last_fetch):
             'tableu_code',
             'industry_sector_code',
             'industry_subsector_code',
-            'category_code']
+            'type_code']
         instruments.set_index('id', inplace=True)
         instruments['ticker'] = ar_to_fa_series(instruments['ticker'])
         instruments['name'] = ar_to_fa_series(instruments['name'])
@@ -105,7 +106,7 @@ def instruments_and_share_increase(last_fetch_date, last_record_id):
         instruments = pd.DataFrame([instrument.split(',')for instrument in instruments])
         instruments.columns = [
             'id',
-            'company_code_12',
+            'inst_code_12',
             'inst_code_5',
             'name_latin',
             'company_code_4',
@@ -121,7 +122,7 @@ def instruments_and_share_increase(last_fetch_date, last_record_id):
             'tableu_code',
             'industry_sector_code',
             'industry_subsector_code',
-            'category_code']
+            'type_code']
         instruments.set_index('id', inplace=True)
         instruments['ticker'] = ar_to_fa_series(instruments['ticker'])
         instruments['name'] = ar_to_fa_series(instruments['name'])
@@ -163,19 +164,29 @@ def log_error(error_str):
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Scrape Instrument Types ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 def instrument_types():
-    ws_instrument_text = requests.get(
+    resp = requests.get(
         'http://cdn.tsetmc.com/api/StaticData/GetStaticContent/WS-Instrument', 
-        headers= request_headers).text
+        headers= request_headers)
     
-    soup = BeautifulSoup(ws_instrument_text, 'lxml')
-    table = soup.find_all('tbody')[3] 
+    repeats = 0
+    if resp and resp.text:
+        soup = BeautifulSoup(resp.text, 'lxml')
+        table = soup.find_all('tbody')[3] 
+    elif repeats < 3:
+        sleep(2.0)
+        repeats += 1
+        instrument_types()
+    else:
+        print('Getting Instrument Types Failed.')
+    
+    logger_app.info(f'Got Instrument Types After <{repeats}> Retries.')
     
     return pd.DataFrame(
         html_table_to_matrix(table), 
-        columns=['code', 'category', 'sub_category'],
+        columns=['code', 'type', 'sub_type'],
         index=None).dropna(
             how='all', 
-            subset=['category', 'sub_category']
+            subset=['type', 'sub_type']
             ).set_index('code')
 
 
@@ -184,26 +195,32 @@ def identity(instrument_id):
     resp = requests.get(
         f'http://www.tsetmc.com/Loader.aspx?Partree=15131M&i={instrument_id}', 
         headers= request_headers)
+    resp.raise_for_status()
     
     soup = BeautifulSoup(resp.text, 'lxml')
     table = soup.find("table", class_='table1')
-    
-    return pd.DataFrame(
-        html_table_to_matrix(table), 
+    matrix = html_table_to_matrix(table)
+    inst_id = pd.DataFrame(
+        matrix, 
         columns= ['attr', 'value'], 
-        index= None)
+        index= None
+    )
+    inst_id['isin'] = matrix[7][1]
+    
+    return inst_id
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Scrape Instrument Attribs/Identity (شناسه) - Async ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
+# region: Scrape Attribs Async
 async def get_identity_html(instrument_id: str) -> str:
-    logging.info(f"Getting HTML for instrument {instrument_id}")
+    # logger_app.info(f"Getting HTML for instrument {instrument_id}")
     
     url = f'http://www.tsetmc.com/Loader.aspx?Partree=15131M&i={instrument_id}'
     
-    #sem = asyncio.BoundedSemaphore(25)
-    
-    #async with sem:
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit_per_host=5)) as session:
+    tcp_connector = aiohttp.TCPConnector(limit_per_host=1)
+    # sem = asyncio.Semaphore(25)
+    # async with sem:
+    async with aiohttp.ClientSession(connector=tcp_connector) as session:
         async with session.get(url, headers=request_headers) as resp:
             resp.raise_for_status()
             
@@ -211,7 +228,7 @@ async def get_identity_html(instrument_id: str) -> str:
             return html
 
 # parse HTML and extract Table
-def get_table_identity(html: str):
+def get_table_off_the_page(html: str):
     soup = BeautifulSoup(html, 'lxml')
     table = soup.find("table", class_='table1')
     if not table:
@@ -224,15 +241,18 @@ async def get_instruments_identity(instrument_ids):
     loop = asyncio.get_event_loop()
     tasks = [loop.create_task(get_identity_html(id)) for id in instrument_ids]
     
+    delay_factor = 1
     all_identities = []
     for task in tqdm(tasks):
         html = await task
-        all_identities.append(get_table_identity(html))
+        matrix = get_table_off_the_page(html)
+        all_identities.append(matrix)
+        await asyncio.sleep(delay_factor * random())
     return all_identities 
 
 # make a clean df out of all the IDs' matrices 
 def identities_async(instrument_ids): 
-    print('\nGetting Identities of Instruments...')
+    
     matrices = asyncio.run(get_instruments_identity(instrument_ids))
     
     updated_ids = pd.DataFrame()
@@ -241,17 +261,22 @@ def identities_async(instrument_ids):
             matrix, 
             columns= ['attr', 'value'], 
             index= None)
-        inst_id['isin'] = matrix[0][1]
+        inst_id['isin'] = matrix[7][1]
         updated_ids = pd.concat([updated_ids, inst_id]) # make it a generator and yield IDs later and test
-    return updated_ids # if it keeps track of IDs in case of a break due to "disonnect from server",...
+    updated_ids = updated_ids.pivot(index='isin', columns='attr', values='value')
+    
+    return updated_ids # if it keeps track of IDs in case of a break due to "disonnect from server",... 
+# endregion 
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instrument Daily OHLCV Values up to the current date ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 def instrument_daily_quotes_history_up_to_date(arg):
-    resp = requests.get(url=cfg['URI']['DAILY_PRICES_HISTROY_TO_DATE'].format(arg))
+    resp = requests.get(
+        url=cfg['URI']['DAILY_PRICES_HISTROY_TO_DATE'].format(arg), 
+        headers=request_headers, cookies=cookie_jar)
     resp.raise_for_status()
     
-    logging.info(f'Arg: {arg}')
+    logger_app.info(f'Arg: {arg}')
     
     if resp and resp.text:
         return pd.DataFrame(
@@ -269,4 +294,4 @@ def instrument_daily_quotes_history_up_to_date(arg):
             'dday', 
             'open'])
     else:
-        logging.info(f'{arg}: No Quote.')
+        logger_app.info(f'{arg}: No Quote.')

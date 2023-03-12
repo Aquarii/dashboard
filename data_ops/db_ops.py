@@ -1,39 +1,24 @@
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Imports & Setups ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 from datetime import datetime
-from more_itertools import ichunked
-from sqlalchemy import create_engine, URL, text
+from random import random
+from time import sleep
+from more_itertools import chunked, ichunked
+import sqlite3 as db
 import pandas as pd
+from tqdm import tqdm
 import config
 from . import fetch
-from sys import exit
-import logging 
-from tqdm import tqdm
-
-
-logging.basicConfig(
-    filename='log.log', 
-    filemode='a', 
-    level=logging.INFO,
-    format='%(asctime)s >> %(levelname)s >> %(filename)s >> %(lineno)d >> %(message)s')
-
+from .utils import logger_activity
+# import pathlib 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Global Vars ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
 cfg = config.configs
-for key in cfg['DB'].keys():
-    if not cfg['DB'][key]:
-        cfg['DB'][key] = input(f'Insert Postgres Database "{key.capitalize()}": ')
+# for key in cfg['PG_DB'].keys():
+#     if not cfg['PG_DB'][key]:      ##### For Postgres
+#         cfg['PG_DB'][key] = input(f'Insert Postgres Database "{key.capitalize()}": ')
 
 latest_workday = int(fetch.last_possible_deven())
-
-db_url = URL.create(
-    'postgresql+psycopg2',
-    username = cfg['DB']['USERNAME'],
-    password = cfg['DB']['PASSWORD'],
-    host = cfg['DB']['HOST'],
-    database = cfg['DB']['NAME']
-)
-engine = create_engine(db_url, echo=False)
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ DB Health ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
@@ -46,17 +31,20 @@ def check_db_integrity(table_names:list): #later
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Update DB Wholly or Selectively ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
-def update_db(*tables:str, force_init=False):
+def update_db(*tables:str, async_=False, force_init=False):
     '''
     No Args= instruments + daily_quotes\n
     Pick Tables from:\n
     \t"instruments": Updates Instruments Catalogue and Share Increase.\n
-    \t"daily_quotes": Updates Quotes of Instruments in "instruments".\n
-    \t"instruments_info_only": Updates Instruments Catalogue in "instruments".\n
-    \t"instrument_types": Updates Instrument Types in "instrument_types".\n
+    \t"daily_quotes": Updates Quotes of Instruments in Table "instruments".\n
+    \t"instruments_info_only": Updates Instruments Catalogue in Table "instruments".\n
+    \t"types": Updates Instrument Types in Table "types".\n
     '''
+    
+    ############## force_init -> pathlib.Path.unlink(path to file)
+    
     if not len(tables):
-        tables = ('instruments', 'daily_quotes')
+        tables = ('instruments', 'identity', 'types')# 'daily_quotes',
     
     for table in tables:
         match table:
@@ -66,154 +54,111 @@ def update_db(*tables:str, force_init=False):
                     print('Instruments Catalogue is already up to date.')
                 
                 elif cfg['LAST_UPDATE']['INSTRUMENTS'] < latest_workday:
-                    update_instruments_info_and_share_increase(force_init=force_init)
+                    get_instruments_and_share_increase()
                     
-                    if not cfg['LAST_UPDATE']['INSTRUMENTS']:
-                        update_instrument_types()
-                        
-                        # set conf
-                        cfg['LAST_UPDATE']['INSTRUMENT_TYPES'] = datetime.now().date()
-                        
-                        print('Catalogue Initialized.')
-                    
+                    if not cfg['LAST_UPDATE']['INSTRUMENTS'] or force_init:
+                        print('Instrument List is Initialized.')
                     else:
-                        print('Catalogue updated.')
-                    
-                    # set conf
-                    cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
+                        print('Instrument List is Updated.')
                 
                 else:
                     print('Error: Invalid Configuration.')
             
-            # ---------- daily quotes ---------- #
-            case 'daily_quotes':
-                if cfg['LAST_UPDATE']['DAILY_QUOTES'] == latest_workday:
-                    print('Daily Quotes are already up to date.')
+            # ---------- Identities ---------- #
+            case 'identity':
+                if cfg['LAST_UPDATE']['IDENTITIES'] == latest_workday:
+                    print('Instruments Identities are already up to date.')
                 
-                elif cfg['LAST_UPDATE']['DAILY_QUOTES'] < latest_workday:
-                    update_daily_quotes(force_init=force_init)
+                elif cfg['LAST_UPDATE']['IDENTITIES'] < latest_workday:
+                    get_instruments_identities(async_=async_)
                     
-                    if not cfg['LAST_UPDATE']['DAILY_QUOTES']:
-                        print('Daily Quotes Initialized.')
-                    
+                    if not cfg['LAST_UPDATE']['IDENTITIES'] or force_init:
+                        print('Identities Initialized.')
                     else:
-                        print('Daily Quotes updated.')
-                    
-                    #set config
-                    cfg['LAST_UPDATE']['DAILY_QUOTES'] = latest_workday
-                
-                else:
-                    print('Error: Invalid Configuration.')
+                        print('Identities Updated.')
+            
+            # ---------- Daily Quotes ---------- #
+            case 'daily_quotes':
+                get_daily_quotes()
             
             # ---------- instrument types ---------- #
-            case 'instrument_types':
-                update_instrument_types()
+            case 'types':
+                if cfg['LAST_UPDATE']['INSTRUMENT_TYPES'].month < datetime.now().month:
+                    get_instrument_types()
                 
                 print('Instrument Type Catalogue Updated.')
-                
-                # set conf
-                cfg['LAST_UPDATE']['INSTRUMENT_TYPES'] = datetime.now().date()
             
             # ---------- update instruments info only ---------- #
-            case 'instruments_info_only':
-                update_instruments_info()
-                
-                # set conf
-                cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
+            case 'instruments_only':
+                get_instruments(force_init=force_init)
+                get_instruments_identities(force_init=force_init)
             
             # ---------- default ---------- #
             case _:
                 print('Input Not Recognized.')
-    
-    config.write(cfg)
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instruments Category Info ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
-def update_instruments_info(force_init=False):
-    if force_init:
-        confimation = input("NOT gonna take a long time anymore! xp (approx. 45 mins). Say 'yes' if you sure?")
-        if confimation == 'yes':
-            cfg['LAST_UPDATE']['INSTRUMENTS'] = 0
-        else:
-            exit(0)
+def get_instruments():
+    conn = db.connect(cfg['PATH']['DB'])
     
-    # Instruments: get updates, overwrite moded, append new, save mod history
-    all_open_instruments = fetch.instruments(0) 
-    instrument_update = fetch.instruments(cfg['LAST_UPDATE']['INSTRUMENTS'])
+    latest_workday_parsed = datetime.strptime(str(latest_workday), '%Y%m%d')
+    delta = (latest_workday_parsed.weekday() - 2) % 7
+    last_wed_date = latest_workday - delta
     
-    ids_to_get_attrs_for = instrument_update[instrument_update['tableu_code'] != '6'].index
+    # ---- All Instruments - Latest Modification
+    instruments_all = fetch.instruments(0)
+    instruments_all.to_sql(
+        'instruments_all', 
+        con=conn, 
+        if_exists='replace'
+    ) # TODO: dtypes later
     
-    conn = engine.connect()
-    
-    if cfg['LAST_UPDATE']['INSTRUMENTS']:
-        instrument_prev = pd.read_sql(
-            sql=text('SELECT * FROM instruments'), 
-            con=conn, 
-            index_col='id')
-        
-        common_filter = instrument_update.index.isin(instrument_prev.index) 
-        new_instruments = instrument_update[~common_filter]
-        repeated_instruments = instrument_update[common_filter]
-        shelved_instruments = instrument_prev[~instrument_prev.index.isin(all_open_instruments.index)] # Usage in History
-        
-        new_instruments.to_sql('instruments_latest_addition', conn, if_exists='replace', index=True)
-        logging.info(
-            f'{len(new_instruments.index)} new instruments registered at tse db since last update. ')
-        
-        for idx in repeated_instruments.index:
-            instrument_prev.loc[idx] = repeated_instruments.loc[idx]
-        
-        instrument_update = pd.concat([instrument_prev, new_instruments])
-        
-        # region: History of Modifications of All the Instruments #later
-        # instruments_mod_history = pd.concat([instrument_prev, instrument_update])
-        # instruments_mod_history.drop_duplicates(['isin','mod_date'], inplace=True)
-        
-        # instruments_mod_history.to_sql(
-        #     'instrument_history', 
-        #     con=conn, 
-        #     if_exists='replace', 
-        #     index=True, 
-        #     method='multi') # dtypes later
-        # endregion
-    
-    instrument_update.to_sql(
-        'instruments', 
+    # ---- Currently Trading Instruments
+    valid_instruments = instruments_all[
+        instruments_all['mod_date'] > str(last_wed_date)
+    ]
+    valid_instruments.to_sql(
+        'instruments_valid', 
         con=conn, 
         if_exists='replace', 
         index=True, 
-        method='multi') # dtypes later
+        method='multi'
+    ) # TODO: dtypes later
     
-    # Identities(attrs/شناسه): get updates, overwrite moded, append new, write to db
-    if cfg['LAST_UPDATE']['INSTRUMENTS']:
-        identities = pd.read_sql(text('SELECT * FROM identity'), con=conn)
-    else: 
-        identities = pd.DataFrame()
-    
-    identities_update = fetch.identities_async(ids_to_get_attrs_for)
-    
-    identities = pd.concat([identities, identities_update])
-    identities.drop_duplicates(['isin','attr'], keep='last', inplace=True)
-    identities.to_sql(
-        'identity', 
+    # ---- Instruments Added Since the Last Update
+    latest_additions = instruments_all[
+        instruments_all['mod_date'] > str(cfg['LAST_UPDATE']['INSTRUMENTS'])
+    ]
+    latest_additions.to_sql(
+        'instruments_latest_additions', 
         con=conn, 
         if_exists='replace', 
-        index=False, 
-        method='multi')
+        index=True, 
+        method='multi'
+    ) # TODO: dtypes later
+    
+    logger_activity.info(
+        f'{len(latest_additions.index)} new instruments registered at tse db since last update. '
+    )
     
     conn.commit()
     conn.close()
+    
+    # Set Conf
+    cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
+    config.write(cfg)
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instrument Types ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
-def update_instrument_types():
+def get_instrument_types():
     instrument_types = fetch.instrument_types()
     
-    conn = engine.connect()
+    conn = db.connect(cfg['PATH']['DB'])
     
     instrument_types.to_sql(
-        'instrument_types', 
+        'types', 
         con=conn, 
         if_exists='replace', 
         index=True, 
@@ -221,133 +166,201 @@ def update_instrument_types():
     
     conn.commit()
     conn.close()
+    
+    # Set Conf
+    cfg['LAST_UPDATE']['INSTRUMENT_TYPES'] = datetime.now().date()
+    config.write(cfg)
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Instruments Category Info & Share Increase ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
 
-def update_instruments_info_and_share_increase(force_init=False):
-    if force_init:
-        confimation = input("Say 'yes' if you're sure? ")
-        if confimation == 'yes':
-            cfg['LAST_UPDATE']['INSTRUMENTS'] = 0
-            cfg['LAST_UPDATE']['CAPITAL_INCREASE'] = 0
-        else:
-            exit(0)
-    
-    # Instruments: get updates, overwrite moded, append new, save mod history, write to db
-    # all_open_instruments = fetch.instruments(0) # FOR HISTORY
-    instrument_update, share_increase = fetch.instruments_and_share_increase(
-        last_fetch_date=cfg['LAST_UPDATE']['INSTRUMENTS'],
+def get_instruments_and_share_increase():
+    _, share_increase = fetch.instruments_and_share_increase(
+        last_fetch_date=0,
         last_record_id=cfg['LAST_UPDATE']['CAPITAL_INCREASE']
     )
     
-    ids_to_get_attrs_for = instrument_update[instrument_update['tableu_code'] != '6'].index ###########################
+    latest_workday_parsed = datetime.strptime(str(latest_workday), '%Y%m%d')
+    delta = (latest_workday_parsed.weekday() - 2) % 7
+    last_wed_date = latest_workday - delta
     
-    conn = engine.connect()
+    conn = db.connect(cfg['PATH']['DB'])
     
-    if cfg['LAST_UPDATE']['INSTRUMENTS']:
-        instrument_prev = pd.read_sql(
-            sql=text('SELECT * FROM instruments'), 
-            con=conn, 
-            index_col='id'
-        )
-        
-        common_filter = instrument_update.index.isin(instrument_prev.index) 
-        new_instruments = instrument_update[~common_filter]
-        repeated_instruments = instrument_update[common_filter]
-        # shelved_instruments = instrument_prev[~instrument_prev.index.isin(all_open_instruments.index)] # FOR HISTORY
-        
-        new_instruments.to_sql('instruments_latest_addition', conn, if_exists='replace', index=True)
-        logging.info(
-            f'{len(new_instruments.index)} new instruments registered at tse db since last update. ')
-        
-        for idx in repeated_instruments.index:
-            instrument_prev.loc[idx] = repeated_instruments.loc[idx]
-        
-        instrument_update = pd.concat([instrument_prev, new_instruments])
-        
-        # region: History of Modifications of All the Instruments
-        # instruments_mod_history = pd.concat([instrument_prev, instrument_update])
-        # instruments_mod_history.drop_duplicates(['isin','mod_date'], inplace=True)
-        
-        # instruments_mod_history.to_sql(
-        #     'instruments_history', 
-        #     con=__conn, 
-        #     if_exists='replace', 
-        #     index=True, 
-        #     method='multi') # dtypes later
-        # endregion
+    # ---- All Instruments - Latest Modification
+    instruments_all = fetch.instruments(0)
+    instruments_all.to_sql(
+        'instruments_all', 
+        con=conn, 
+        if_exists='replace'
+    ) # TODO: dtypes later
     
-    instrument_update.to_sql(
-        'instruments', 
+    # ---- Currently Trading Instruments
+    valid_instruments = instruments_all[
+        instruments_all['mod_date'] > str(last_wed_date)
+    ]
+    valid_instruments.to_sql(
+        'instruments_valid', 
         con=conn, 
         if_exists='replace', 
         index=True, 
-        method='multi') # dtypes later
+        method='multi'
+    ) # TODO: dtypes later
     
-    # --- Identities(attrs/شناسه): get updates, overwrite moded, append new, write to db
-    if cfg['LAST_UPDATE']['INSTRUMENTS']:
-        identities = pd.read_sql(text('SELECT * FROM identity'), con=conn)
-    else: 
-        identities = pd.DataFrame()
-    
-    identities_update = fetch.identities_async(ids_to_get_attrs_for)
-    
-    identities = pd.concat([identities, identities_update])
-    identities.drop_duplicates(['isin','attr'], keep='last', inplace=True)
-    identities.to_sql(
-        'identity', 
+    # ---- Instruments Added Since the Last Update
+    latest_additions = instruments_all[
+        instruments_all['mod_date'] > str(cfg['LAST_UPDATE']['INSTRUMENTS'])
+    ]
+    latest_additions.to_sql(
+        'instruments_latest_additions', 
         con=conn, 
         if_exists='replace', 
-        index=False, 
-        method='multi')
+        index=True, 
+        method='multi'
+    ) # TODO: dtypes later
     
+    # Set Conf
+    cfg['LAST_UPDATE']['INSTRUMENTS'] = latest_workday
+    
+    logger_activity.info(
+        f'{len(latest_additions.index)} new instruments registered at tse db since last update. '
+    )
+    
+    # -------- Shares -------- #
     if share_increase is not None:
         share_increase.to_sql(
             'capital_increase', 
             con=conn, 
             if_exists='append', 
             index=True, 
-            method='multi') # dtypes later
+            method='multi') # TODO: dtypes later
         
         # set conf
         cfg['LAST_UPDATE']['CAPITAL_INCREASE'] = share_increase.index[-1]
-        print('New Share Change(s) Due to Capital Increase.')
+        print('New Share Increase(s) Due to Capital Increase.')
     
-    # clean up the mess. TODO: Replace aqlalchemy with psycopg2.
     conn.commit()
     conn.close()
     config.write(cfg) 
 
 
 #▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Daily Quotes ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
+def get_instruments_identities(async_=True):
+    # --- Identities(attrs/شناسه): get updates, overwrite moded, append new, write to db
+    conn = db.connect(cfg['PATH']['DB'])
+    
+    instruments = pd.read_sql(
+        f'''
+        SELECT id, tableu_code, mod_date 
+        FROM instruments_all
+        WHERE mod_date > {str(cfg['LAST_UPDATE']['IDENTITIES'])}
+        ''', 
+        con= conn, 
+        index_col= 'id'
+    )
+    
+    ids_to_get_attrs_for = instruments[instruments['tableu_code'] != '6'].index 
+    
+    if cfg['LAST_UPDATE']['IDENTITIES']:
+        identities = pd.read_sql('SELECT * FROM identities', con=conn)
+    else: 
+        identities = pd.DataFrame()
+    
+    print('\nGetting Identities of Instruments...')
+    
+    if async_:
+        identities_update = fetch.identities_async(ids_to_get_attrs_for)
+        
+        identities = pd.concat([identities, identities_update])
+        identities = identities.drop_duplicates('کد 12 رقمی شرکت', keep='last')
+        
+        identities.to_sql(
+            'identities', 
+            con=conn, 
+            if_exists='replace', 
+            index=True, 
+            method='multi'
+        )
+        conn.commit()
+        
+        delay_factor = 7
+        sleep(random() * delay_factor)
+    
+    conn.close()
+    
+    # Set Conf
+    cfg['LAST_UPDATE']['IDENTITIES'] = latest_workday
+    config.write(cfg)
 
-def update_daily_quotes(force_init=False):    
-    conn = engine.connect()
-    instruments = pd.read_sql(text('select id, tableu_code from instruments'), con=conn, index_col='id')
+
+#▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ Daily Quotes ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
+
+def get_daily_quotes():    
+    conn = db.connect(cfg['PATH']['DB'])
     
-    if force_init:
-        date = 0
+    table_exists = conn.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='update_tracker'")
+    table_exists = table_exists.fetchone()[0]
+    
+    if table_exists:
+        update_tracker = pd.read_sql('SELECT * FROM update_tracker', con=conn, index_col='id')
     else:
-        date = cfg['LAST_UPDATE']['DAILY_QUOTES']
+        update_tracker = pd.read_sql('SELECT id, tableu_code FROM instruments_all', con=conn, index_col='id')
+        update_tracker['daily_quotes_last_update'] = 0
+        update_tracker['daily_quotes_last_try'] = 0
+        update_tracker['daily_quotes_last_try_result'] = 0
     
-    def make_arg(id, date):
-        if instruments.at[id,'tableu_code'] == '6':
-            return id + ',' + str(date) + ',' + '1'
+    for id in update_tracker.index:
+        if update_tracker.at[id,'tableu_code'] == '6':
+            update_tracker.loc[id, 'arg'] = id + ',' + str(update_tracker.at[id, 'daily_quotes_last_update']) + ',' + '1'
         else:
-            return id + ',' + str(date) + ',' + '0'
+            update_tracker.loc[id, 'arg'] = id + ',' + str(update_tracker.at[id, 'daily_quotes_last_update']) + ',' + '0'
+    
+    required_insts = update_tracker[
+        (update_tracker['daily_quotes_last_try'] < latest_workday) | (
+            update_tracker['daily_quotes_last_try_result'] == 0)].index
     
     print('\nGetting Daily Quotes...')
     
-    # Async Later # Freezes without Chunkes
-    for chunk in tqdm(ichunked(tqdm(instruments.index), 20)):
-        daily_quotes = pd.concat(
-            [fetch.instrument_daily_quotes_history_up_to_date(make_arg(id,date)) for id in chunk]
-        )
+    # Async Later # Why Freezes without Chunkes?
+    for chunk in tqdm(ichunked(tqdm(required_insts), 20)):
+        quotes_chunk = []
+        for id in chunk:
+                inst_quotes = fetch.instrument_daily_quotes_history_up_to_date(update_tracker.at[id, 'arg'])
+                
+                update_tracker.at[id, 'daily_quotes_last_try'] = latest_workday 
+                
+                if inst_quotes is None:
+                    update_tracker.at[id, 'daily_quotes_last_try_result'] = 0
+                
+                else:
+                    quotes_chunk.append(inst_quotes)
+                    update_tracker.at[id, 'daily_quotes_last_update'] = inst_quotes.iloc[-1]['date']
+                    update_tracker.at[id, 'daily_quotes_last_try_result'] = 1
         
-        daily_quotes.to_sql('daily_quotes', con=conn, if_exists='append', index=False)
+        daily_quotes = pd.concat(quotes_chunk)
+        daily_quotes.drop_duplicates(['instrument_id','date'], keep='last', inplace=True)
+        daily_quotes.to_sql('daily_quotes', con=conn, if_exists='append', index=False) # بدون اینکه چک کنه قبلا درج شده باشه اضافه میکنه. وقتی ارور میده چون از ادامش رزوم نمیشه اون اولی هایی ک رایت شده اند رو هم دوباره درج میکنه
+        update_tracker.to_sql('update_tracker', con=conn, if_exists='replace', index= True)
     
     conn.commit()
     conn.close()
 
 
+#▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ All Instruments Info in One Table ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬#
+
+def instruments_aio():
+    conn = db.connect(cfg['PATH']['DB'])
+    
+    identities = pd.read_sql('SELECT * FROM identities', con=conn)
+    insts_db = pd.read_sql('SELECT * FROM instruments_all', con=conn)
+    types = pd.read_sql('SELECT * FROM types', con=conn)
+    # update_tracker = pd.read_sql('SELECT id, daily_quotes_last_update FROM update_tracker', con=conn)
+    
+    instruments_aio = insts_db.merge(identities, 'left', on='isin')
+    instruments_aio = instruments_aio.merge(types, 'left', left_on='type_code', right_on='code')
+    instruments_aio = instruments_aio.drop('code',axis=1).drop_duplicates('isin')
+    # instruments_aio = instruments_aio.merge(update_tracker, 'inner', on='id', suffixes=(None, '_r'))
+    
+    instruments_aio.to_sql('instruments_aio', con=conn, if_exists='replace', index=False)
+    
+    conn.commit()
+    conn.close()

@@ -1,6 +1,6 @@
-import logging
 from datetime import datetime
 import config 
+from data_ops.utils import logger_app
 from data_ops import (
     latest_workday, 
     update_db,
@@ -10,17 +10,18 @@ from data_ops import (
     # update_instruments_info
 )
 
-logging.info(' ===================== Commencing Session... ====================== ')
+logger_app.info(' ===================== Commencing Session... ====================== ')
 
 
 cfg = config.configs 
+
 print('\nLatest Workday: {}\nLast Database Update: {}\n'.format(
-    datetime.strptime(str(latest_workday), '%Y%m%d').date(), 
-    datetime.strptime(str(cfg['LAST_UPDATE']['INSTRUMENTS']), '%Y%m%d').date()))
+    datetime.strptime(str(latest_workday), '%Y%m%d').strftime('%Y-%m-%d (%A)'), 
+    cfg['LAST_UPDATE']['INSTRUMENTS']))
 
 # Main.py
 # region: Update Database
-update_db()
+update_db(async_=True)
 # endregion
 
-logging.info(' ===================== End Of Session ====================== ')
+logger_app.info(' ===================== End Of Session ====================== ')

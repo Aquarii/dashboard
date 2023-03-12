@@ -4,3 +4,6 @@ log.log
 **/__pycache__/*
 db/catalogue.db
 config/configurations.toml
+activity.log
+app.log
+bkp/*
